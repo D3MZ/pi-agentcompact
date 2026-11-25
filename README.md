@@ -22,13 +22,13 @@ pi -e ./extension.ts
 
 ## Settings
 
-Run `/afk` in Pi to toggle **Enabled** or change **Idle compaction (minutes)**. Changes take effect immediately. When disabled, `/afk` is still available to turn the plugin back on.
+Run `/agentcompact` in Pi to toggle **Enabled** or change **Idle compaction (minutes)**. Changes take effect immediately. When disabled, `/agentcompact` is still available to turn the plugin back on.
 
-The menu saves to `~/.pi/agent/settings.json`, or to a trusted project's `.pi/settings.json` if it already has a `piAfk` block. You can also edit that block directly and run `/reload`:
+The menu saves to `~/.pi/agent/settings.json`, or to a trusted project's `.pi/settings.json` if it already has a `piAgentCompact` block. You can also edit that block directly and run `/reload`:
 
 ```json
 {
-  "piAfk": {
+  "piAgentCompact": {
     "enabled": true,
     "idleCompactionMinutes": 5
   }

@@ -11,23 +11,23 @@ import {
 	type SessionManager,
 } from "@earendil-works/pi-coding-agent";
 
-interface AfkSettings {
+interface AgentCompactSettings {
 	enabled: boolean;
 	idleCompactionMinutes: number;
 }
 
-type PiSettings = { piAfk?: Partial<AfkSettings> };
+type PiSettings = { piAgentCompact?: Partial<AgentCompactSettings> };
 
 function readSettings(path: string): PiSettings {
 	return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
 }
 
-function saveSettings(ctx: ExtensionContext, changes: Partial<AfkSettings>): void {
+function saveSettings(ctx: ExtensionContext, changes: Partial<AgentCompactSettings>): void {
 	const projectPath = join(ctx.cwd, CONFIG_DIR_NAME, "settings.json");
 	const project = ctx.isProjectTrusted() ? readSettings(projectPath) : {};
-	const path = project.piAfk ? projectPath : join(getAgentDir(), "settings.json");
-	const settings = project.piAfk ? project : readSettings(path);
-	settings.piAfk = { ...settings.piAfk, ...changes };
+	const path = project.piAgentCompact ? projectPath : join(getAgentDir(), "settings.json");
+	const settings = project.piAgentCompact ? project : readSettings(path);
+	settings.piAgentCompact = { ...settings.piAgentCompact, ...changes };
 	writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
@@ -50,7 +50,7 @@ function summarize(branch: SessionEntry[], logFile: string): string {
 }
 
 export default function (pi: ExtensionAPI): void {
-	let settings: AfkSettings = { enabled: false, idleCompactionMinutes: 5 };
+	let settings: AgentCompactSettings = { enabled: false, idleCompactionMinutes: 5 };
 	let timer: ReturnType<typeof setTimeout> | undefined;
 
 	const clearTimer = () => clearTimeout(timer);
@@ -72,17 +72,17 @@ export default function (pi: ExtensionAPI): void {
 		}, settings.idleCompactionMinutes * 60_000).unref();
 	}
 
-	pi.registerCommand("afk", {
-		description: "Edit AFK compaction settings",
+	pi.registerCommand("agentcompact", {
+		description: "Edit AgentCompact settings",
 		handler: async (_args, ctx) => {
 			if (!ctx.hasUI) return;
 			while (true) {
 				const toggle = `Enabled: ${settings.enabled ? "Yes" : "No"}`;
 				const idle = `Idle compaction (minutes): ${settings.idleCompactionMinutes}`;
-				const choice = await ctx.ui.select("AFK compaction settings", settings.enabled
+				const choice = await ctx.ui.select("AgentCompact settings", settings.enabled
 					? [toggle, idle, "Done"]
 					: [toggle, "Done"]);
-				let changes: Partial<AfkSettings>;
+				let changes: Partial<AgentCompactSettings>;
 				if (choice === toggle) {
 					changes = { enabled: !settings.enabled };
 				} else if (settings.enabled && choice === idle) {
@@ -106,8 +106,8 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_start", (_event, ctx) => {
-		const { piAfk } = pi.getSettings() as PiSettings;
-		settings = { enabled: piAfk?.enabled ?? true, idleCompactionMinutes: piAfk?.idleCompactionMinutes ?? 5 };
+		const { piAgentCompact } = pi.getSettings() as PiSettings;
+		settings = { enabled: piAgentCompact?.enabled ?? true, idleCompactionMinutes: piAgentCompact?.idleCompactionMinutes ?? 5 };
 		armTimer(ctx);
 	});
 

@@ -6,11 +6,11 @@ import { test, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 import { createAssistantMessageEventStream, contentText } from "@earendil-works/pi-ai";
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import afk from "../extension.ts";
+import agentCompact from "../extension.ts";
 
 async function start(t: TestContext, settings: object = {}, inputTokens = 0, projectSettings?: object) {
 	t.mock.timers.enable({ apis: ["setTimeout"] });
-	const cwd = mkdtempSync(join(tmpdir(), "pi afk "));
+	const cwd = mkdtempSync(join(tmpdir(), "pi-agentcompact "));
 	t.after(() => rmSync(cwd, { recursive: true, force: true }));
 	writeFileSync(join(cwd, "settings.json"), JSON.stringify(settings));
 	if (projectSettings) {
@@ -23,9 +23,9 @@ async function start(t: TestContext, settings: object = {}, inputTokens = 0, pro
 	const cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 	const resourceLoader = new DefaultResourceLoader({
 		cwd, agentDir: cwd, settingsManager,
-		extensionFactories: [afk, (pi) => {
-			pi.registerProvider("afk-test", {
-				api: "afk-test", apiKey: "mock", baseUrl: "http://127.0.0.1",
+		extensionFactories: [agentCompact, (pi) => {
+			pi.registerProvider("agentcompact-test", {
+				api: "agentcompact-test", apiKey: "mock", baseUrl: "http://127.0.0.1",
 				models: [{
 					id: "test", name: "Test", input: ["text"], cost, reasoning: false,
 					contextWindow: 128_000, maxTokens: 1024,
@@ -52,7 +52,7 @@ async function start(t: TestContext, settings: object = {}, inputTokens = 0, pro
 	});
 	t.after(() => session.dispose());
 	await session.bindExtensions({ mode: "rpc" });
-	await session.setModel(session.modelRuntime.getModel("afk-test", "test")!);
+	await session.setModel(session.modelRuntime.getModel("agentcompact-test", "test")!);
 	return { session, manager, requests, cwd };
 }
 
@@ -112,7 +112,7 @@ test("Pi's automatic compaction also uses the replacement summary", async (t) =>
 });
 
 test("honors a custom idle timeout", async (t) => {
-	const { session, manager } = await start(t, { piAfk: { idleCompactionMinutes: 1 } });
+	const { session, manager } = await start(t, { piAgentCompact: { idleCompactionMinutes: 1 } });
 	await session.prompt("Hello");
 	t.mock.timers.tick(59_999);
 	assert.notEqual(manager.getLeafEntry()?.type, "compaction");
@@ -122,7 +122,7 @@ test("honors a custom idle timeout", async (t) => {
 
 test("disabled leaves compaction to Pi and ignores the idle timeout", async (t) => {
 	const { session, manager, requests } = await start(t, {
-		piAfk: { enabled: false, idleCompactionMinutes: 1 },
+		piAgentCompact: { enabled: false, idleCompactionMinutes: 1 },
 		compaction: { keepRecentTokens: 0 },
 	});
 	await session.prompt("Hello");
@@ -138,7 +138,7 @@ test("disabled leaves compaction to Pi and ignores the idle timeout", async (t) 
 	assert.notEqual(compacted.firstKeptEntryId, compacted.id);
 });
 
-test("/afk applies and saves both settings, and can re-enable the plugin", async (t) => {
+test("/agentcompact applies and saves both settings, and can re-enable the plugin", async (t) => {
 	const { session, manager, cwd } = await start(t, { hideThinkingBlock: true });
 	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 	process.env.PI_CODING_AGENT_DIR = cwd;
@@ -152,7 +152,8 @@ test("/afk applies and saves both settings, and can re-enable the plugin", async
 	const runner = session.extensionRunner;
 	runner.setUIContext({
 		...runner.getUIContext(),
-		async select(_title, options) {
+		async select(title, options) {
+			assert.equal(title, "AgentCompact settings");
 			menus.push(options);
 			return options[choices.shift()!];
 		},
@@ -162,7 +163,7 @@ test("/afk applies and saves both settings, and can re-enable the plugin", async
 	}, "rpc");
 
 	await session.prompt("Hello");
-	await session.prompt("/afk");
+	await session.prompt("/agentcompact");
 	assert.deepEqual(menus, [
 		["Enabled: Yes", "Idle compaction (minutes): 5", "Done"],
 		["Enabled: Yes", "Idle compaction (minutes): 1.5", "Done"],
@@ -171,7 +172,7 @@ test("/afk applies and saves both settings, and can re-enable the plugin", async
 	]);
 	assert.deepEqual(JSON.parse(readFileSync(join(cwd, "settings.json"), "utf8")), {
 		hideThinkingBlock: true,
-		piAfk: { enabled: true, idleCompactionMinutes: 1.5 },
+		piAgentCompact: { enabled: true, idleCompactionMinutes: 1.5 },
 	});
 	t.mock.timers.tick(89_999);
 	assert.notEqual(manager.getLeafEntry()?.type, "compaction");
@@ -179,10 +180,10 @@ test("/afk applies and saves both settings, and can re-enable the plugin", async
 	assert.equal(manager.getLeafEntry()?.type, "compaction");
 });
 
-test("/afk edits an existing project override without changing user settings", async (t) => {
-	const global = { piAfk: { idleCompactionMinutes: 5 } };
+test("/agentcompact edits an existing project override without changing user settings", async (t) => {
+	const global = { piAgentCompact: { idleCompactionMinutes: 5 } };
 	const { session, manager, cwd } = await start(t, global, 0, {
-		piAfk: { idleCompactionMinutes: 2 },
+		piAgentCompact: { idleCompactionMinutes: 2 },
 	});
 	const runner = session.extensionRunner;
 	const choices = [0, 1];
@@ -193,11 +194,11 @@ test("/afk edits an existing project override without changing user settings", a
 		},
 	}, "rpc");
 	await session.prompt("Hello");
-	await session.prompt("/afk");
+	await session.prompt("/agentcompact");
 	t.mock.timers.tick(300_000);
 	assert.notEqual(manager.getLeafEntry()?.type, "compaction");
 	assert.deepEqual(JSON.parse(readFileSync(join(cwd, ".pi", "settings.json"), "utf8")), {
-		piAfk: { enabled: false, idleCompactionMinutes: 2 },
+		piAgentCompact: { enabled: false, idleCompactionMinutes: 2 },
 	});
 	assert.deepEqual(JSON.parse(readFileSync(join(cwd, "settings.json"), "utf8")), global);
 });
