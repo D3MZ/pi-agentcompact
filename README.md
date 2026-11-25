@@ -6,9 +6,11 @@ A Pi 1.6 extension that replaces compaction summaries without calling a model. I
 
 The JSONL session log remains intact. The summary uses the active branch, including user messages from before earlier compactions. It copies text verbatim, without truncating it or checking whether it fits the context window.
 
+On subsequent turns, Pi sends this summary to the configured model as context. The file URI includes the absolute path to the local session log, which may contain your OS username.
+
 ## Install
 
-Install with Git access to the private repository:
+Install from GitHub:
 
 ```sh
 pi install git:github.com/D3MZ/pi-agentcompact

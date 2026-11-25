@@ -1,2 +1,9 @@
 node_modules/
 .pi/
+
+# Local agent instructions, credentials, and OS metadata
+AGENTS.md
+.env
+.env.*
+.npmrc
+.DS_Store
