@@ -1,6 +1,10 @@
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+	CONFIG_DIR_NAME,
 	estimateTokens,
+	getAgentDir,
 	type ExtensionAPI,
 	type ExtensionContext,
 	type SessionEntry,
@@ -8,8 +12,23 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 interface AfkSettings {
-	enabled?: boolean;
-	idleCompactionMinutes?: number;
+	enabled: boolean;
+	idleCompactionMinutes: number;
+}
+
+type PiSettings = { piAfk?: Partial<AfkSettings> };
+
+function readSettings(path: string): PiSettings {
+	return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+}
+
+function saveSettings(ctx: ExtensionContext, changes: Partial<AfkSettings>): void {
+	const projectPath = join(ctx.cwd, CONFIG_DIR_NAME, "settings.json");
+	const project = ctx.isProjectTrusted() ? readSettings(projectPath) : {};
+	const path = project.piAfk ? projectPath : join(getAgentDir(), "settings.json");
+	const settings = project.piAfk ? project : readSettings(path);
+	settings.piAfk = { ...settings.piAfk, ...changes };
+	writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
 function summarize(branch: SessionEntry[], logFile: string): string {
@@ -31,15 +50,14 @@ function summarize(branch: SessionEntry[], logFile: string): string {
 }
 
 export default function (pi: ExtensionAPI): void {
-	let enabled = false;
-	let idleCompactionMinutes = 5;
+	let settings: AfkSettings = { enabled: false, idleCompactionMinutes: 5 };
 	let timer: ReturnType<typeof setTimeout> | undefined;
 
 	const clearTimer = () => clearTimeout(timer);
 
 	function armTimer(ctx: ExtensionContext): void {
 		clearTimer();
-		if (!enabled) return;
+		if (!settings.enabled) return;
 		const manager = ctx.sessionManager;
 		const logFile = manager.getSessionFile();
 		if (!logFile || !manager.buildSessionProjection().messages.some((message) => message.role === "user")) return;
@@ -51,13 +69,45 @@ export default function (pi: ExtensionAPI): void {
 			// Pi 1.6 exposes the live manager as read-only. Its compaction command skips the
 			// hook for short sessions, so append the native retain-none entry directly here.
 			(manager as SessionManager).appendCompaction(summary, null, tokensBefore, undefined, true);
-		}, idleCompactionMinutes * 60_000).unref();
+		}, settings.idleCompactionMinutes * 60_000).unref();
 	}
 
+	pi.registerCommand("afk", {
+		description: "Edit AFK compaction settings",
+		handler: async (_args, ctx) => {
+			if (!ctx.hasUI) return;
+			while (true) {
+				const toggle = `Enabled: ${settings.enabled ? "Yes" : "No"}`;
+				const idle = `Idle compaction (minutes): ${settings.idleCompactionMinutes}`;
+				const choice = await ctx.ui.select("AFK compaction settings", settings.enabled
+					? [toggle, idle, "Done"]
+					: [toggle, "Done"]);
+				let changes: Partial<AfkSettings>;
+				if (choice === toggle) {
+					changes = { enabled: !settings.enabled };
+				} else if (settings.enabled && choice === idle) {
+					const input = await ctx.ui.input("Idle compaction in minutes", String(settings.idleCompactionMinutes));
+					if (input === undefined) continue;
+					const minutes = Number(input);
+					// Node timers overflow beyond approximately 35,791 minutes.
+					if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 35_791) {
+						ctx.ui.notify("Enter a positive number of minutes up to 35,791.", "warning");
+						continue;
+					}
+					changes = { idleCompactionMinutes: minutes };
+				} else {
+					return;
+				}
+				saveSettings(ctx, changes);
+				settings = { ...settings, ...changes };
+				armTimer(ctx);
+			}
+		},
+	});
+
 	pi.on("session_start", (_event, ctx) => {
-		const { piAfk } = pi.getSettings() as { piAfk?: AfkSettings };
-		enabled = piAfk?.enabled ?? true;
-		if (enabled) idleCompactionMinutes = piAfk?.idleCompactionMinutes ?? 5;
+		const { piAfk } = pi.getSettings() as PiSettings;
+		settings = { enabled: piAfk?.enabled ?? true, idleCompactionMinutes: piAfk?.idleCompactionMinutes ?? 5 };
 		armTimer(ctx);
 	});
 
@@ -68,7 +118,7 @@ export default function (pi: ExtensionAPI): void {
 	pi.on("session_shutdown", clearTimer);
 
 	pi.on("session_before_compact", (event, ctx) => {
-		if (!enabled) return;
+		if (!settings.enabled) return;
 		const logFile = ctx.sessionManager.getSessionFile();
 		if (!logFile) return;
 		return {

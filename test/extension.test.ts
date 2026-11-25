@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -8,11 +8,15 @@ import { createAssistantMessageEventStream, contentText } from "@earendil-works/
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import afk from "../extension.ts";
 
-async function start(t: TestContext, settings: object = {}, inputTokens = 0) {
+async function start(t: TestContext, settings: object = {}, inputTokens = 0, projectSettings?: object) {
 	t.mock.timers.enable({ apis: ["setTimeout"] });
 	const cwd = mkdtempSync(join(tmpdir(), "pi afk "));
 	t.after(() => rmSync(cwd, { recursive: true, force: true }));
 	writeFileSync(join(cwd, "settings.json"), JSON.stringify(settings));
+	if (projectSettings) {
+		mkdirSync(join(cwd, ".pi"));
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify(projectSettings));
+	}
 	const settingsManager = SettingsManager.create(cwd, cwd);
 	const manager = SessionManager.create(cwd, cwd);
 	const requests: string[][] = [];
@@ -49,7 +53,7 @@ async function start(t: TestContext, settings: object = {}, inputTokens = 0) {
 	t.after(() => session.dispose());
 	await session.bindExtensions({ mode: "rpc" });
 	await session.setModel(session.modelRuntime.getModel("afk-test", "test")!);
-	return { session, manager, requests };
+	return { session, manager, requests, cwd };
 }
 
 test("idle compaction resets on each turn, persists, and replaces the next request's history", async (t) => {
@@ -132,4 +136,68 @@ test("disabled leaves compaction to Pi and ignores the idle timeout", async (t) 
 	assert.ok(compacted.summary.includes("Reply 2"));
 	assert.equal(compacted.fromHook, false);
 	assert.notEqual(compacted.firstKeptEntryId, compacted.id);
+});
+
+test("/afk applies and saves both settings, and can re-enable the plugin", async (t) => {
+	const { session, manager, cwd } = await start(t, { hideThinkingBlock: true });
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = cwd;
+	t.after(() => {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	});
+
+	const menus: string[][] = [];
+	const choices = [1, 0, 0, 2];
+	const runner = session.extensionRunner;
+	runner.setUIContext({
+		...runner.getUIContext(),
+		async select(_title, options) {
+			menus.push(options);
+			return options[choices.shift()!];
+		},
+		async input() {
+			return "1.5";
+		},
+	}, "rpc");
+
+	await session.prompt("Hello");
+	await session.prompt("/afk");
+	assert.deepEqual(menus, [
+		["Enabled: Yes", "Idle compaction (minutes): 5", "Done"],
+		["Enabled: Yes", "Idle compaction (minutes): 1.5", "Done"],
+		["Enabled: No", "Done"],
+		["Enabled: Yes", "Idle compaction (minutes): 1.5", "Done"],
+	]);
+	assert.deepEqual(JSON.parse(readFileSync(join(cwd, "settings.json"), "utf8")), {
+		hideThinkingBlock: true,
+		piAfk: { enabled: true, idleCompactionMinutes: 1.5 },
+	});
+	t.mock.timers.tick(89_999);
+	assert.notEqual(manager.getLeafEntry()?.type, "compaction");
+	t.mock.timers.tick(1);
+	assert.equal(manager.getLeafEntry()?.type, "compaction");
+});
+
+test("/afk edits an existing project override without changing user settings", async (t) => {
+	const global = { piAfk: { idleCompactionMinutes: 5 } };
+	const { session, manager, cwd } = await start(t, global, 0, {
+		piAfk: { idleCompactionMinutes: 2 },
+	});
+	const runner = session.extensionRunner;
+	const choices = [0, 1];
+	runner.setUIContext({
+		...runner.getUIContext(),
+		async select(_title, options) {
+			return options[choices.shift()!];
+		},
+	}, "rpc");
+	await session.prompt("Hello");
+	await session.prompt("/afk");
+	t.mock.timers.tick(300_000);
+	assert.notEqual(manager.getLeafEntry()?.type, "compaction");
+	assert.deepEqual(JSON.parse(readFileSync(join(cwd, ".pi", "settings.json"), "utf8")), {
+		piAfk: { enabled: false, idleCompactionMinutes: 2 },
+	});
+	assert.deepEqual(JSON.parse(readFileSync(join(cwd, "settings.json"), "utf8")), global);
 });
