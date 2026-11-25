@@ -1,4 +1,4 @@
-# pi-afk
+# pi-agentcompact
 
 A Pi 1.6 extension that replaces compaction summaries without calling a model. It keeps only this text in the compacted conversation context (Pi still retains its normal system prompt):
 
@@ -11,7 +11,7 @@ The JSONL session log remains intact. The summary uses the active branch, includ
 Install with Git access to the private repository:
 
 ```sh
-pi install git:github.com/D3MZ/pi-afk
+pi install git:github.com/D3MZ/pi-agentcompact
 ```
 
 To try a local checkout without installing:
